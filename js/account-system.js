@@ -2,7 +2,7 @@ class ZilzalAccountSystem {
   constructor(){this.profile=null;this.guest=false;this.timer=null;this.sb=null;}
   init(){
     this.sb=(window.zilzalApp?.getSupabase?.() || (window.supabase&&window.ZILZAL_SUPABASE_URL&&!window.ZILZAL_SUPABASE_URL.includes('ضع_')?window.supabase.createClient(window.ZILZAL_SUPABASE_URL,window.ZILZAL_SUPABASE_ANON_KEY):null));
-    this.bindUI(); this.restore();
+    this.bindUI(); this.setupPasswordRecovery(); this.restore();
   }
   bindUI(){
     const toggle=document.getElementById('official-accounts-toggle'), panel=document.getElementById('official-accounts-panel');
@@ -11,9 +11,65 @@ class ZilzalAccountSystem {
     document.getElementById('z-guest-btn')?.addEventListener('click',()=>this.enterGuest());
     document.getElementById('z-login-form')?.addEventListener('submit',e=>{e.preventDefault();this.login();});
     document.getElementById('z-signup-form')?.addEventListener('submit',e=>{e.preventDefault();this.signup();});
+    document.getElementById('z-forgot-password')?.addEventListener('click',()=>this.requestPasswordReset());
+    document.getElementById('z-reset-password-form')?.addEventListener('submit',e=>{e.preventDefault();this.finishPasswordReset();});
+    document.getElementById('z-reset-close')?.addEventListener('click',()=>this.hideResetModal());
     document.getElementById('feature-close')?.addEventListener('click',()=>this.closeModal());
     document.querySelectorAll('[data-z-action]').forEach(b=>b.addEventListener('click',()=>this.action(b.dataset.zAction)));
     document.addEventListener('click',e=>{const room=e.target.closest('[data-tab="rooms"]');if(room&&!this.profile){e.preventDefault();e.stopImmediatePropagation();this.needAccount('دخول الرومات متاح للحسابات المسجلة فقط.');}},true);
+  }
+  setupPasswordRecovery(){
+    if(!this.sb)return;
+    this.sb.auth.onAuthStateChange((event)=>{
+      if(event==='PASSWORD_RECOVERY') this.showResetModal();
+    });
+    const u=new URL(location.href);
+    const hash=new URLSearchParams(location.hash.replace(/^#/,''));
+    if(u.searchParams.get('type')==='recovery' || hash.get('type')==='recovery') {
+      setTimeout(()=>this.showResetModal(),150);
+    }
+  }
+  showResetModal(){
+    const m=document.getElementById('z-reset-password-modal');
+    if(m){m.classList.remove('hidden');m.classList.add('flex');}
+    const gate=document.getElementById('zilzal-auth-gate');
+    gate?.classList.add('hidden');
+    setTimeout(()=>document.getElementById('z-reset-password-1')?.focus(),100);
+  }
+  hideResetModal(){
+    const m=document.getElementById('z-reset-password-modal');
+    if(m){m.classList.add('hidden');m.classList.remove('flex');}
+  }
+  async requestPasswordReset(){
+    if(!this.sb)return this.msg('اربط Supabase أولاً',true);
+    const email=prompt('اكتب البريد الإلكتروني المرتبط بحسابك:');
+    if(!email)return;
+    try{
+      this.msg('جاري إرسال رابط الاستعادة...');
+      const redirectTo=location.origin+location.pathname;
+      const {error}=await this.sb.auth.resetPasswordForEmail(email.trim(),{redirectTo});
+      if(error)throw error;
+      this.msg('تم إرسال رابط تغيير كلمة المرور إلى بريدك.');
+    }catch(e){this.msg(e.message||'تعذر إرسال رابط الاستعادة',true);}
+  }
+  async finishPasswordReset(){
+    if(!this.sb)return;
+    const p1=document.getElementById('z-reset-password-1').value;
+    const p2=document.getElementById('z-reset-password-2').value;
+    const msg=document.getElementById('z-reset-msg');
+    if(p1.length<6){msg.textContent='كلمة المرور يجب أن تكون 6 أحرف على الأقل.';msg.style.color='#fb7185';return;}
+    if(p1!==p2){msg.textContent='كلمتا المرور غير متطابقتين.';msg.style.color='#fb7185';return;}
+    msg.textContent='جاري تحديث كلمة المرور...';msg.style.color='#67e8f9';
+    const {error}=await this.sb.auth.updateUser({password:p1});
+    if(error){msg.textContent=error.message;msg.style.color='#fb7185';return;}
+    msg.textContent='تم تغيير كلمة المرور بنجاح ✅';msg.style.color='#86efac';
+    history.replaceState({},document.title,location.pathname);
+    setTimeout(async()=>{
+      this.hideResetModal();
+      await this.sb.auth.signOut();
+      this.profile=null;this.guest=false;this.paint();this.showGate();
+      this.msg('تم تغيير كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.');
+    },1200);
   }
   async restore(){
     if(!this.sb){ if(localStorage.getItem('zilzal_guest')==='1') return this.enterGuest(false); return this.showGate(); }
